@@ -1,5 +1,10 @@
 # Centipede Clone
 
+![C++](https://img.shields.io/badge/C%2B%2B-14-00599C?style=flat&logo=cplusplus&logoColor=white)
+![SFML](https://img.shields.io/badge/SFML-2.5%2B-8CC445?style=flat&logo=sfml&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-Windows-0078D6?style=flat&logo=windows&logoColor=white)
+![License](https://img.shields.io/badge/license-Educational-lightgrey?style=flat)
+
 A modern C++14 clone of the classic arcade game **Centipede**, built using [SFML](https://www.sfml-dev.org/) for graphics and audio. The game features a menu, instructions, scoring, and classic centipede gameplay with mushrooms, bullets, and split mechanics.
 
 ## Features
@@ -11,6 +16,60 @@ A modern C++14 clone of the classic arcade game **Centipede**, built using [SFML
 - Menu system with Play, Instructions, and Quit options.
 - Victory and Game Over screens with scoring.
 - Background music and sound effects.
+
+## Project at a Glance
+
+Scoring is computed directly from three counters tracked in `Centipede.cpp` (`score = 1*mushroomDead + 10*bodyC + 20*headC`) — hitting the centipede's head is worth 20x more than clearing a mushroom:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/charts/scoring-by-target-dark.png">
+  <img src="docs/charts/scoring-by-target.png" alt="Bar chart of points awarded per target: mushroom destroyed 1 point, body segment destroyed 10 points, head destroyed 20 points" width="600" />
+</picture>
+
+### Game state flow
+
+The game runs on a `GameState` enum (`MENU`, `PLAYING`, `INSTRUCTIONS`, `GAME_OVER`, `VICTORY`). Instructions is a side branch off the menu, while Playing resolves into either ending based on whether the player dies first or clears every centipede segment first:
+
+```mermaid
+flowchart LR
+    classDef a fill:#4C72B0,stroke:#2E4670,stroke-width:2px,color:#ffffff
+    classDef b fill:#DD8452,stroke:#854F31,stroke-width:2px,color:#ffffff
+    classDef c fill:#4C9F8A,stroke:#2F6455,stroke-width:2px,color:#ffffff
+    classDef d fill:#C9A227,stroke:#7A6418,stroke-width:2px,color:#ffffff
+
+    Menu[Menu]:::a
+    Instructions[Instructions]:::b
+    Playing[Playing]:::c
+    GameOver[Game Over]:::d
+    Victory[Victory]:::d
+
+    Menu -- Select Instructions --> Instructions
+    Instructions -- ESC --> Menu
+    Menu -- Select Play --> Playing
+    Playing -- Player hit by centipede --> GameOver
+    Playing -- All segments destroyed --> Victory
+    GameOver -- ESC --> Menu
+    Victory -- ESC --> Menu
+```
+
+### Sprite gallery
+
+A sample of the real shipped game art from `CentipedeClone/Textures/`:
+
+<table>
+<tr>
+<td align="center"><img src="CentipedeClone/Textures/player.png" width="80" /><br />player.png</td>
+<td align="center"><img src="CentipedeClone/Textures/c_head_left.png" width="80" /><br />c_head_left.png</td>
+<td align="center"><img src="CentipedeClone/Textures/mushroom.png" width="80" /><br />mushroom.png</td>
+<td align="center"><img src="CentipedeClone/Textures/halfMushroom.png" width="80" /><br />halfMushroom.png</td>
+</tr>
+<tr>
+<td align="center"><img src="CentipedeClone/Textures/explosion.png" width="80" /><br />explosion.png</td>
+<td align="center"><img src="CentipedeClone/Textures/spider_and_score.png" width="120" /><br />spider_and_score.png</td>
+<td align="center"><img src="CentipedeClone/Textures/game_over.png" width="120" /><br />game_over.png</td>
+<td align="center"><img src="CentipedeClone/Textures/you_won.png" width="120" /><br />you_won.png</td>
+</tr>
+</table>
 
 ## Controls
 
@@ -62,6 +121,7 @@ A modern C++14 clone of the classic arcade game **Centipede**, built using [SFML
 - Window size and position can be adjusted in the code (`window.setSize`, `window.setPosition`).
 - All assets must be present in the correct folders for the game to run.
 - The game grid and logic are tuned for a 960x960 resolution but can be adjusted.
+- SFML is vendored under `include/` and `lib/` for convenience so the project builds without a separate SFML install.
 
 ## License
 
