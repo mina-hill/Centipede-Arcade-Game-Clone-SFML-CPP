@@ -83,6 +83,52 @@ A sample of the real shipped game art from `CentipedeClone/Textures/`:
 - **Centipede body segment destroyed**: 10 points
 - **Centipede head destroyed**: 20 points
 
+## How the Centipede Moves
+
+The centipede is stored as a flat array `float centipede[Csize][4]` (`Csize = 12`), where each row holds `{x, y, exists, movingRight}`. There's no linked list or parent/child pointer chain — segment `i` simply follows behind segment `i - 1` by array position, and a parallel `bool segmentIsHead[Csize]` flags which entries currently act as a head. All of this is driven once per frame by `moveCentipedeLR()`, gated by `centipedeClock` so it only actually steps every 200ms regardless of how fast the render loop spins.
+
+**Head movement.** For every segment where `segmentIsHead[i]` is true, the function checks two things before moving it:
+1. **Screen-edge check** — if the segment is at `x <= 0` while moving left, or at `x >= resolutionX - boxPixelsX` while moving right, that's a wall hit.
+2. **Mushroom check** — it converts the head's pixel position to grid cell (`x / boxPixelsX`, `y / boxPixelsY`), looks one cell ahead in the direction of travel, and checks `gameGrid[nextCellX][headGridY]` for value `1` (mushroom) or `3` (half-eaten mushroom).
+
+If either condition trips, the head does **not** move sideways that tick — instead it drops down one row (`y += boxPixelsY`) and flips its direction bit (`centipede[i][3] = !centipede[i][3]`). Otherwise it just slides one grid cell (32px) in its current direction. This is the classic "hit a wall or a mushroom, drop and reverse" Centipede behavior, and here it is resolved per-head, so a split centipede with two heads (see below) can be turning in opposite corners of the field independently.
+
+**Body follow-through.** Before any positions are updated, the function snapshots every segment's current `{x, y}` into a `prevPositions` buffer. Then, for each non-head segment `i`, it looks for `j = i - 1` (the previous array slot) and — if that segment still exists — moves segment `i` into segment `j`'s *pre-move* position and copies `j`'s direction bit. That one-frame-lagged "step into where the segment ahead of you used to be" is what produces the visual "conga line" of the body trailing the head around corners; there's no independent physics or spline for the body, just an index-shifted copy of last frame's positions.
+
+## Collision Detection
+
+None of the collision checks in this codebase use SFML's `sf::Sprite::getGlobalBounds().intersects()`. `getLocalBounds()` only shows up for centering text/sprite origins (e.g. `titleText.setOrigin(...)`, `centipedeHeadSprite.setOrigin(...)`). Every actual hit test is hand-rolled arithmetic on the raw `float[]` coordinate arrays or on the `int gameGrid[gameRows][gameColumns]` occupancy grid:
+
+- **Bullet vs. centipede** (`splitC()`): a manual axis-aligned check — `bullet[y]` must fall within `[centipede[i][y], centipede[i][y] + boxPixelsY]` and `bullet[x]` within `[centipede[i][x], centipede[i][x] + boxPixelsX]`. No sprite bounds are consulted at all, just the two position arrays.
+- **Bullet vs. mushroom** (`destroyMushroom()`): this one isn't sprite-vs-sprite at all — it walks the entire `gameGrid` looking for an occupied cell (`1`/`2` = full, `3`/`4` = half) whose cell rectangle contains the bullet's position (`bullet[x] + 16` for the horizontal center, `bullet[y]` for the leading edge). A first hit degrades a full mushroom to its half-eaten state (`1→3`, `2→4`); a second hit on an already-half mushroom clears the cell to `0` and increments `mushroomDead` — i.e. mushrooms take two shots to destroy.
+- **Player vs. centipede** (`deadPlayer()`): a shrunk-box AABB test — both the player's and the segment's hitboxes are inset by 8px (`boxPixelsX - 8` / `boxPixelsY - 8`) before checking `xOverlap && yOverlap`, so the two 32px sprites need substantial visual overlap, not just edge-touching, before `player[exists]` is set to `false`.
+- **Centipede vs. mushroom** (movement turning): also grid-based, not sprite-based — see the "Mushroom check" step above and in `mVSc()` (which duplicates that same grid lookahead but, per the *Known Limitations* section below, is never actually called).
+
+In short: everything here is grid-cell and raw-coordinate math rather than SFML's built-in bounding-box intersection helper, which also explains why hitboxes (like the player's 8px inset) had to be tuned by hand rather than derived from the sprites' real bounds.
+
+## Frame Timing & Game Loop
+
+The `while(window.isOpen())` loop has **no `setFramerateLimit()` and no vertical sync enabled**, so it renders and polls events as fast as the OS/GPU will allow. Rather than scaling movement by real delta-time, the game gates individual behaviors with dedicated `sf::Clock` instances that are checked and conditionally `restart()`-ed every frame:
+
+- `bulletClock` lets `moveBullet()` advance the bullet by 10px only once at least 5ms have elapsed since the last move.
+- `centipedeClock` lets `moveCentipedeLR()` advance the centipede by one 32px grid cell only once at least 200ms have elapsed.
+
+Everything else (player movement, drawing, collision checks) runs on every single iteration of the loop with no throttle, since player movement is driven directly by discrete `KeyPressed` events rather than a per-frame poll. The practical effect is a fixed, frame-rate-independent walking pace for the centipede and bullet (as long as the machine can sustain >200ms/~5ms ticks), at the cost of the main loop otherwise spinning uncapped and doing full redraw work every iteration.
+
+## Known Limitations & Possible Enhancements
+
+Verified directly against `CentipedeClone/Centipede.cpp` and `CentipedeClone/Textures/` — not inferred from filenames alone:
+
+- **No persistent high score.** There is no file I/O anywhere in the source (no `ifstream`/`ofstream`, no save file) — `score` is a plain `int` that resets to `0` every time `resetGame()` runs, so nothing survives a restart. A simple `highscore.txt` read/write around `resetGame()` and the game-over transition would be a natural first enhancement.
+- **No difficulty scaling.** The centipede's move interval is a hardcoded `200ms` in `moveCentipedeLR()`, the bullet's is a hardcoded `5ms` in `moveBullet()`, and `Csize` (12 segments) never changes — nothing in the code increments a level counter, speeds up the centipede, or spawns more segments/mushrooms as play continues. Every playthrough is the same fixed pace and mushroom count (`rand() % 11 + 20`, i.e. 20–30) from `mushrooms()`.
+- **Spider, flea, and scorpion are assets only — not gameplay.** `Textures/spider_and_score.png`, `Textures/flea.png`, and `Textures/scorpion.png` ship in the repo, but a full-text search of `Centipede.cpp` turns up zero references to "spider", "flea", or "scorpion" — no texture load, no position array, no spawn logic. Only `player.png`, `bullet.png`, `c_head_left.png`, `c_body_left.png`, `mushroom.png`, `halfMushroom.png`, `jkk.jpg`, `game_over.png`, and `you_won.png` are ever passed to `loadFromFile()`. The same is true of `background.png`, `death.png`, `explosion.png`, `mushroom1.png`, `gameover.jpg`, `jk.jpg`, `you_won.jpg`, and the `_walk` variants of the centipede head/body sprites — present in `Textures/` but never loaded, so the classic Centipede bonus enemies and the walk-cycle animation frames are unused art rather than working features.
+- **`mVSc()` is dead code.** It's declared, defined, and fully implemented (grid lookahead for centipede-vs-mushroom turning), but it is never called from `main()` or anywhere else — the equivalent logic was instead duplicated inline inside `moveCentipedeLR()`. Removing the unused function (or actually wiring it in and removing the duplicate inline block) would be a good cleanup.
+- **No two-player support.** There is exactly one `player[3]` array and one set of arrow-key/space bindings; nothing in the input handling or draw calls accounts for a second player.
+- **No mushroom-overlap protection at spawn.** `mushrooms()` places 20–30 mushrooms with `rand() % gameRows` / `rand() % (gameColumns - 5)` and no check against cells that are already occupied, so two mushrooms can silently land on the same cell (the second `gameGrid` write just overwrites the first).
+- **Explosion/death art isn't animated in.** `explosion.png` and `death.png` exist under `Textures/` but destruction of a centipede segment or mushroom is instantaneous in code (`exists = false` / grid value flips) — there's no explosion sprite or particle shown at the moment of impact.
+
+These are good, scoped starting points for anyone picking up the project next: wiring in one of the unused enemy sprites (spider is the most iconic Centipede bonus target) or adding a simple score-multiplier per level would both build on logic that's already partly in place (the grid, the scoring counters, the split mechanic) rather than requiring a rewrite.
+
 ## How to Build
 
 1. **Dependencies**:
